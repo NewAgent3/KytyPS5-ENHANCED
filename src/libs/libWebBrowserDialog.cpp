@@ -1,5 +1,6 @@
 #include "common/abi.h"
 #include "common/logging/log.h"
+#include "libs/errno.h"
 #include "libs/libs.h"
 #include "loader/symbolDatabase.h"
 

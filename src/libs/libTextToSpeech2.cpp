@@ -17,6 +17,11 @@ namespace TextToSpeech2 {
 constexpr int TTS2_STATUS_STOPPED  = 0;
 constexpr int TTS2_STATUS_SPEAKING = 1;
 
+// The SDK fails operations on a speaker that was never opened with a negative
+// module error. The exact code is not publicly documented, so the emulator uses
+// its own module-prefixed value; guests only test the sign of the result.
+constexpr int TTS2_ERROR_INVALID_SPEAKER_ID = static_cast<int>(0x80f20001u);
+
 struct SpeakerState {
 	bool open  = false;
 	bool muted = false;

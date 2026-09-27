@@ -3,6 +3,7 @@
 #include "common/common.h"
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
+#include "libs/errno.h"
 #include "libs/libs.h"
 #include "loader/symbolDatabase.h"
 
