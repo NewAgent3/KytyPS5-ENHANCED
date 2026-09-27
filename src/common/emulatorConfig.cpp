@@ -139,6 +139,16 @@ bool TessellationEnabled() {
 	return g_config->tessellation_enabled;
 }
 
+RayTracingMode GetRayTracingMode() {
+	return g_config->ray_tracing_mode;
+}
+
+uint32_t GetRayTracingMaxRecursion() {
+	// The Vulkan spec requires maxRecursionDepth to be at most 31, and the
+	// guest shader compilers cap their own stack depth well below that.
+	return std::clamp(g_config->ray_tracing_max_recursion, 1u, 31u);
+}
+
 bool PlayGoHackEnabled() {
 	return g_config->playgo_hack_enabled;
 }

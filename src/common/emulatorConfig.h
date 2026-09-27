@@ -25,6 +25,12 @@ enum class LogDirection { Silent, Console, File };
 
 enum class PresentMode { Fifo, Mailbox, Immediate };
 
+// Guest BVH-accelerated dispatches (RDNA2 IMAGE_BVH64_* MIMG opcodes) cannot be
+// recompiled without hardware ray tracing. The emulator either skips such
+// dispatches entirely (legacy behavior) or keeps them when the host device
+// exposes Vulkan ray tracing and a BVH fallback is armed for future use.
+enum class RayTracingMode { Disabled, Auto, Enabled };
+
 using Keymap = std::vector<std::string>;
 
 constexpr uint32_t DEFAULT_CONSOLE_LANGUAGE = 1;
@@ -67,6 +73,8 @@ struct ConfigOptions {
 	bool                   renderdoc_enabled           = false;
 	bool                   readback_linear_images      = false;
 	bool                   tessellation_enabled        = false;
+	RayTracingMode         ray_tracing_mode            = RayTracingMode::Auto;
+	uint32_t               ray_tracing_max_recursion   = 4;
 	bool                   playgo_hack_enabled         = false;
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	bool red_zone_protection_enabled = false;
@@ -112,6 +120,8 @@ bool GpuAssistedValidationEnabled();
 bool RenderDocEnabled();
 bool ReadbackLinearImagesEnabled();
 bool TessellationEnabled();
+RayTracingMode GetRayTracingMode();
+uint32_t GetRayTracingMaxRecursion();
 bool PlayGoHackEnabled();
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 bool RedZoneProtectionEnabled();

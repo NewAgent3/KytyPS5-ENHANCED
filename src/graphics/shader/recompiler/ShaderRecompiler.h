@@ -22,6 +22,10 @@ struct CompileOptions {
 	std::span<const uint32_t>   user_data;
 	std::span<const uint32_t>   back_code;
 	ShaderStageInputInfo        input_info;
+	// Host device exposes Vulkan ray tracing; lets compute shaders containing
+	// BVH instructions reach the (future) RT lowering path instead of being
+	// skipped at translate time.
+	bool                        ray_tracing_supported      = false;
 };
 
 struct TranslateResult {

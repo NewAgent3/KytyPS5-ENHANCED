@@ -35,6 +35,17 @@ struct GraphicContext {
 	bool                               supports_block_texel_view              = false;
 	bool                                      mesh_shader_enabled                   = false;
 	vk::PhysicalDeviceMeshShaderPropertiesEXT mesh_shader_properties                = {};
+	// Vulkan ray tracing (VK_KHR_acceleration_structure + VK_KHR_ray_tracing_pipeline
+	// + VK_KHR_deferred_host_operations). Guest BVH shaders only need traceRays and
+	// acceleration structure building; ray queries are not required.
+	bool ray_tracing_enabled                    = false;
+	bool ray_tracing_pipeline_enabled           = false;
+	uint32_t shader_group_handle_size           = 0;
+	uint32_t shader_group_handle_alignment      = 1;
+	uint32_t shader_group_base_alignment        = 1;
+	uint32_t max_ray_recursion_depth            = 0;
+	uint32_t max_geometry_count                 = 0;
+	uint32_t max_instance_count                 = 0;
 	uint32_t                           subgroup_size                         = 0;
 	uint32_t                           min_subgroup_size                     = 0;
 	uint32_t                           max_subgroup_size                     = 0;

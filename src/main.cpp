@@ -77,6 +77,9 @@ static void PrintUsage() {
 	::printf("  --spirv-debug-printf <true|false>    Enable SPIR-V debug printf.\n");
 	::printf(
 	    "  --readback-linear-images <true|false> Read back writable linear images on submit.\n");
+	::printf(
+	    "  --ray-tracing <value>                Disabled, Auto, or Enabled. Default: Auto.\n");
+	::printf("  --rt-max-recursion <num>             Ray tracing recursion depth. Default: 4.\n");
 	::printf("  --playgo-hack                       Use the supplied PlayGo stub fallback.\n");
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	::printf("  --redzone                            Protect the guest SysV red zone.\n");
@@ -365,6 +368,16 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 		} else if (arg == "--readback-linear-images") {
 			if (!ParseBool(value, options.config.readback_linear_images)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--ray-tracing") {
+			if (!ParseEnum(value, options.config.ray_tracing_mode)) {
+				::printf("invalid ray tracing mode: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--rt-max-recursion") {
+			if (!ParseUint32(value, options.config.ray_tracing_max_recursion)) {
+				::printf("invalid ray tracing recursion depth: %s\n", value.c_str());
 				return false;
 			}
 		} else if (arg == "--keymap") {

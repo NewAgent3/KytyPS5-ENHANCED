@@ -535,10 +535,26 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 
 	const bool mesh_extension = HasExtension(device_extensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
 	vk::PhysicalDeviceMeshShaderFeaturesEXT supported_mesh {};
-	supported_mesh.pNext = &supported_features13;
+	const bool ray_tracing_extension =
+#ifndef __APPLE__
+	    HasExtension(device_extensions, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+	    HasExtension(device_extensions, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+#else
+	    false;
+#endif
+	vk::PhysicalDeviceAccelerationStructureFeaturesKHR supported_acceleration {};
+	vk::PhysicalDeviceRayTracingPipelineFeaturesKHR    supported_ray_tracing_pipeline {};
+	if (ray_tracing_extension) {
+		supported_ray_tracing_pipeline.pNext = &supported_features13;
+		supported_acceleration.pNext         = &supported_ray_tracing_pipeline;
+		supported_mesh.pNext                 = &supported_acceleration;
+	} else {
+		supported_mesh.pNext = &supported_features13;
+	}
 	vk::PhysicalDeviceFeatures2 supported_features2 {};
-	supported_features2.pNext = mesh_extension ? static_cast<void*>(&supported_mesh)
-	                                           : static_cast<void*>(&supported_features13);
+	supported_features2.pNext = mesh_extension || ray_tracing_extension
+	                                ? static_cast<void*>(&supported_mesh)
+	                                : static_cast<void*>(&supported_features13);
 	const bool feedback_extensions =
 	    HasExtension(device_extensions, VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME) &&
 	    HasExtension(device_extensions, VK_EXT_ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE_EXTENSION_NAME);
@@ -558,6 +574,30 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	}
 	physical_device.getFeatures2(&supported_features2);
 	graphics.mesh_shader_enabled = mesh_extension && supported_mesh.meshShader;
+	graphics.ray_tracing_enabled =
+	    ray_tracing_extension && supported_acceleration.accelerationStructure != VK_FALSE &&
+	    supported_ray_tracing_pipeline.rayTracingPipeline != VK_FALSE;
+	graphics.ray_tracing_pipeline_enabled = graphics.ray_tracing_enabled;
+	if (graphics.ray_tracing_enabled) {
+		// Properties chain: ... -> acceleration -> ray_tracing_pipeline -> end.
+		vk::PhysicalDeviceAccelerationStructurePropertiesKHR acceleration_properties {};
+		vk::PhysicalDeviceRayTracingPipelinePropertiesKHR    ray_tracing_properties {};
+		acceleration_properties.pNext = &ray_tracing_properties;
+		vk::PhysicalDeviceProperties2 rt_properties2 {};
+		rt_properties2.pNext = &acceleration_properties;
+		physical_device.getProperties2(&rt_properties2);
+		graphics.shader_group_handle_size      = ray_tracing_properties.shaderGroupHandleSize;
+		graphics.shader_group_handle_alignment = ray_tracing_properties.shaderGroupHandleAlignment;
+		graphics.shader_group_base_alignment   = ray_tracing_properties.shaderGroupBaseAlignment;
+		graphics.max_ray_recursion_depth       = ray_tracing_properties.maxRayRecursionDepth;
+		graphics.max_geometry_count            = acceleration_properties.maxGeometryCount;
+		graphics.max_instance_count            = acceleration_properties.maxInstanceCount;
+		LOGF("Vulkan ray tracing: handle_size=%u handle_align=%u base_align=%u recursion=%u "
+		     "geometries=%u instances=%u\n",
+		     graphics.shader_group_handle_size, graphics.shader_group_handle_alignment,
+		     graphics.shader_group_base_alignment, graphics.max_ray_recursion_depth,
+		     graphics.max_geometry_count, graphics.max_instance_count);
+	}
 
 	vk::PhysicalDeviceSubgroupSizeControlProperties subgroup_size_control {};
 
@@ -655,6 +695,21 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		robustness2.nullDescriptor      = supported_robustness2.nullDescriptor;
 	}
 
+	// Ray tracing features terminate the enabled-feature chain: they are spliced
+	// in after features13 below (features13 -> acceleration -> ray_tracing -> end).
+	vk::PhysicalDeviceAccelerationStructureFeaturesKHR acceleration_features {};
+	vk::PhysicalDeviceRayTracingPipelineFeaturesKHR    ray_tracing_pipeline_features {};
+	if (graphics.ray_tracing_enabled) {
+		ray_tracing_pipeline_features.rayTracingPipeline        = VK_TRUE;
+		acceleration_features.pNext                             = &ray_tracing_pipeline_features;
+		acceleration_features.accelerationStructure             = VK_TRUE;
+		acceleration_features.accelerationStructureCaptureReplay = VK_FALSE;
+		acceleration_features.accelerationStructureHostCommands =
+		    supported_acceleration.accelerationStructureHostCommands;
+		acceleration_features.descriptorBindingAccelerationStructureUpdateAfterBind =
+		    supported_acceleration.descriptorBindingAccelerationStructureUpdateAfterBind;
+	}
+
 	auto features13 = WindowContext::RequiredVulkan13Features();
 #if defined(__APPLE__)
 	features13.pNext = robustness2_ext_enabled ? static_cast<void*>(&robustness2)
@@ -666,6 +721,16 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	features13.robustImageAccess   = supported_features13.robustImageAccess;
 	features13.subgroupSizeControl =
 	    graphics.compute_subgroup_size_control_enabled ? VK_TRUE : VK_FALSE;
+	if (graphics.ray_tracing_enabled) {
+		// Splice the RT features onto the end of the existing feature chain
+		// (features13 -> ... -> depth/color extras -> acceleration -> ray_tracing).
+		// The tail differs by platform, so walk the pNext chain to its end.
+		void** link = &features13.pNext;
+		while (*link != nullptr) {
+			link = static_cast<void**>(*link); // first member of every VkStruct is pNext
+		}
+		*link = &acceleration_features;
+	}
 
 	LOGF("Vulkan robustness: robustImageAccess=%s robustImageAccess2=%s\n",
 	     features13.robustImageAccess == VK_TRUE ? "true" : "false",
@@ -1054,6 +1119,22 @@ void WindowContext::CreateVulkan() {
 				device_extensions.push_back(extension);
 			}
 		}
+#ifndef __APPLE__
+		// Vulkan ray tracing: guest BVH dispatches need acceleration structures and
+		// traceRays. MoltenVK exposes neither extension, so macOS keeps the skip path.
+		if (Config::GetRayTracingMode() != Config::RayTracingMode::Disabled) {
+			if (HasExtension(available_extensions, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+			    HasExtension(available_extensions, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
+			    HasExtension(available_extensions, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)) {
+				device_extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+				device_extensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+				device_extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+			} else if (Config::GetRayTracingMode() == Config::RayTracingMode::Enabled) {
+				LOGF("Vulkan ray tracing was requested but the device lacks "
+				     "VK_KHR_acceleration_structure/VK_KHR_ray_tracing_pipeline\n");
+			}
+		}
+#endif
 		if (HasExtension(available_extensions, VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME) &&
 		    HasExtension(available_extensions, VK_EXT_ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME);

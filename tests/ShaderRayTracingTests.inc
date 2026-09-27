@@ -76,6 +76,19 @@ void TestRayTracingDispatchDetection() {
         "decoder did not stop at the first BVH instruction");
   D::DecodeProgram(ordinary_code, reused);
   Check(!reused.has_bvh, "decoder retained stale BVH metadata");
+
+  // Compute dispatches that contain BVH instructions are always skipped: with
+  // and without host ray tracing support, until the BVH lowering path exists.
+  const auto bvh_span = std::span<const uint32_t>(bvh_code);
+  for (const bool ray_tracing_supported : {false, true}) {
+    auto options = MakeCompileOptions(ShaderType::Compute);
+    options.ray_tracing_supported = ray_tracing_supported;
+    const auto result = ShaderRecompiler::TranslateProgram(bvh_span, options);
+    Check(result.skip_dispatch,
+          "BVH compute dispatch was not skipped without the lowering path");
+    Check(result.program.blocks.empty(), "skipped BVH dispatch produced program blocks");
+  }
+
   for (const auto stage : {ShaderType::Compute, ShaderType::Vertex, ShaderType::Pixel}) {
     const auto options = MakeCompileOptions(stage);
     Check(!ShaderRecompiler::TranslateProgram(ordinary_code, options).skip_dispatch,
